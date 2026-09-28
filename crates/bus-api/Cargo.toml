@@ -1,0 +1,22 @@
+[package]
+name = "bus-api"
+version = "0.1.0"
+edition = "2024"
+description = "进程内消息总线中间件的纯抽象层：trait + 消息类型。业务模块只依赖本 crate，不依赖任何运行时实现。"
+
+[dependencies]
+# 接口签名中只出现 tokio 生态的类型（oneshot / watch / CancellationToken / Bytes）
+# 注意：继承 workspace 依赖时不能再设 default-features = false；workspace 的 tokio 已含 full（包含 sync/macros）
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
+bytes = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, optional = true, features = ["derive"] }
+
+[features]
+default = []
+# 可选的 serde 载荷路径：为消息契约类型派生 Serialize/Deserialize，
+# 作为未来跨进程（gRPC/TCP）演进的序列化基础。主路径仍是 Any 零拷贝。
+serde-payload = ["dep:serde"]

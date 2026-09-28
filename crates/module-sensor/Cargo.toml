@@ -1,0 +1,13 @@
+[package]
+name = "module-sensor"
+version = "0.1.0"
+edition = "2024"
+description = "示例模块 A：温度传感器。事件生产者（pub/sub）+ 服务提供者（请求/响应）+ 参数持有者（get/set + watch 热更新）。"
+
+[dependencies]
+# 只依赖抽象层，绝不依赖任何其他业务模块 crate
+bus-api = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }

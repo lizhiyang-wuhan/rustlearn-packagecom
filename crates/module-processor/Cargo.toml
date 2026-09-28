@@ -1,0 +1,15 @@
+[package]
+name = "module-processor"
+version = "0.1.0"
+edition = "2024"
+description = "示例模块 B：数据处理器。事件消费者（订阅）+ 服务调用者（请求/响应）+ 参数操作者 + 大文件收发（背压流 + 共享内存句柄）。"
+
+[dependencies]
+# 只依赖抽象层，绝不依赖 module-sensor —— 二者通过 bus-api 的 messages 协议解耦
+bus-api = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }

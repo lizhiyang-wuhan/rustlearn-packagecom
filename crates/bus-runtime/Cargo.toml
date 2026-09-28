@@ -1,0 +1,18 @@
+[package]
+name = "bus-runtime"
+version = "0.1.0"
+edition = "2024"
+description = "消息总线中间件的 tokio 实现层：服务路由、请求/响应、发布/订阅广播、参数存储、共享内存大文件传输。"
+
+[dependencies]
+bus-api = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync"] }
+tokio-util = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
