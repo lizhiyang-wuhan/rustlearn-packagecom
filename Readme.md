@@ -26,6 +26,57 @@
 
 ---
 
+## 架构设计
+
+> 详细的架构文档（UML 类图、调用链路、接口汇总）见 [docs/architecture.md](docs/architecture.md)。
+>
+> 代码学习问答手册（按主题归类的提问精讲：类型擦除、泛型约束、对象安全、异步背压等）见 [docs/learning-qa.md](docs/learning-qa.md)。
+
+### 依赖方向
+
+```
+┌─────────────────┐     ┌──────────────────┐
+│ module-sensor   │     │ module-processor │   ← 业务模块（互不依赖）
+│ 只依赖 bus-api  │     │ 只依赖 bus-api   │
+└────────┬────────┘     └────────┬─────────┘
+         ▼                       ▼
+     ┌───────────────────────────────┐
+     │          bus-api              │   ← 纯抽象层（trait + 消息类型）
+     └──────────────┬────────────────┘
+                    │  implements
+                    ▼
+     ┌───────────────────────────────┐
+     │        bus-runtime            │   ← tokio 实现层
+     └──────────────┬────────────────┘
+                    │  组装
+                    ▼
+     ┌───────────────────────────────┐
+     │       src/main.rs             │   ← 装配层（Composition Root）
+     └───────────────────────────────┘
+```
+
+### Crate 职责
+
+| Crate | 类型 | 职责 |
+|---|---|---|
+| **bus-api** | 纯抽象层 | trait 定义、事件信封、Topic、消息契约、错误类型、类型化端点封装 |
+| **bus-runtime** | 实现层 | `MessageBus` 核心总线、`Runtime` 装配运行器、`ParamStore`、`SharedMemoryBlobClient` |
+| **module-sensor** | 业务模块 A | 温度传感器：周期发布 + 服务提供 + 参数持有 |
+| **module-processor** | 业务模块 B | 数据处理器：订阅消费 + 服务调用 + 参数操作 + 大文件传输 |
+| **tokioexample** (根) | 装配层 | `main.rs` 作为 Composition Root，创建总线、注册模块、统一启停 |
+
+### 四种通信语义速览
+
+| 语义 | 底层原语 | 调用链路 |
+|---|---|---|
+| 发布/订阅 | `broadcast` | publish → topic_sender → tx.send → stream.next → downcast |
+| 请求/响应 | `oneshot` + `spawn` | request → 查路由表 → handler.handle → spawn → reply.send → timeout |
+| 参数 get/set | `RwLock` + `watch` | set → send_modify → watch 通知 → changed() → 热更新 |
+| 大文件传输 | `Arc<Bytes>` + `mpsc` | 背压流：send_all → mpsc.send（背压）→ collect_to_end；句柄：publish(SharedBlob) → downcast → read |
+
+> 完整调用链路图（含每一步的函数调用和底层原语）见 [docs/architecture.md](docs/architecture.md#四种通信语义的调用链路)。
+
+---
 
 ## 快速开始
 
@@ -97,6 +148,54 @@ shutdown requested, waiting for modules to finish
 | 错误处理 | `thiserror` |
 | 异步 trait | `async-trait` |
 | 字节缓冲 | `bytes` |
+
+---
+
+## 当前版本 v0.0.1 已知局限
+
+- 仅支持**进程内**通信，所有模块必须在同一进程
+- 每个 topic 只允许注册**一个** handler（不支持同 topic 多实例负载均衡）
+- 广播通道容量固定，慢消费者会丢帧（仅 warn 日志，无重传）
+- 缺少集成测试覆盖，边界场景（handler 超时、重复注册等）尚未测试
+- 无中间件/拦截器机制，无法在消息路径上插入横切逻辑
+
+---
+
+## 下一步计划
+
+> 以下计划围绕消息总线核心能力逐步完善，每一步都是在前一步基础上自然延伸。
+
+### 阶段一：加固基础（v0.1.0）
+
+> 目标：让现有功能更健壮，补上测试和错误处理的短板。
+
+- [ ] **集成测试** —— 为 `bus-runtime` 补充测试用例：覆盖 pub/sub 多订阅者、请求/响应正常路径与超时、参数 get/set/watch、大文件背压流等
+- [ ] **错误处理加固** —— 统一 handler panic 捕获（`tokio::spawn` 内 panic 不应让进程崩溃），补充 `BusError` 的更多恢复路径
+- [ ] **广播通道容量可配置** —— 支持按 topic 设置不同的 broadcast capacity（当前全局统一 256）
+
+### 阶段二：丰富通信能力（v0.2.0）
+
+> 目标：在四种语义之上，增加实用的通信模式。
+
+- [ ] **多 handler 注册** —— 支持同一 topic 注册多个 handler（如轮询分发或广播分发），扩展请求/响应的灵活性
+- [ ] **通配符订阅** —— 支持 `sensor.*` 风格的 pattern 订阅，让一个消费者监听某类 topic 的全部事件
+- [ ] **事件过滤** —— 在 `Subscriber` 层增加可选的消息过滤条件，减少不必要的 downcast 开销
+
+### 阶段三：工程化完善（v0.3.0）
+
+> 目标：让中间件从"能跑"走向"能用"，提升可维护性和可调试性。
+
+- [ ] **结构化日志增强** —— 为每条事件/请求自动附加 `trace_id`，在 `Event` 信封中预留 metadata 字段
+- [ ] **配置化装配** —— 通过 TOML 文件声明模块列表和 topic 路由规则，替代 `main.rs` 中的硬编码注册
+- [ ] **优雅重启** —— 支持单个模块的热重启（停掉旧实例、启动新实例并重新注册 handler），不影响其他模块运行
+
+### 阶段四：跨进程探索（v1.0.0）
+
+> 目标：突破进程内限制，验证架构的可替换性。
+
+- [ ] **TCP 传输层** —— 基于 `tokio::net::TcpStream` 实现跨进程的 `Publisher`/`Subscriber`，验证 trait 抽象的可替换性
+- [ ] **序列化载荷** —— 启用 `serde-payload` feature，将 `Arc<dyn Any>` 零拷贝路径与 `serde_json` 序列化路径并存，按场景选择
+- [ ] **共享内存 Blob** —— 将 `BlobClient` 的 `SharedMemoryBlobClient` 替换为 `memmap2` 匿名 mmap 实现，支持跨进程大文件传输
 
 ---
 
